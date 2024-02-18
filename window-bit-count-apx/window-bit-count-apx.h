@@ -147,9 +147,7 @@ void add_bucket_to_group(Bucket* bucket, Bucket* group_head) {
 }
 
 void merge_buckets(StateApx* self, Bucket* current) {
-    while (current->group_count > self->k + 1)
-    {
-
+    while (current->group_count > self->k + 1) {
         Bucket *group_tail = current->group_tail;
         Bucket *new_head = group_tail->prev;
 
@@ -178,39 +176,29 @@ uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
 
         Bucket *current = new_bucket;
         merge_buckets(self, current);
-
     }
     wnd_bit_count_apx_print(self);
     int count = 0;
     int time_min = self->time - self->wnd_size + 1;
-
     Bucket *current = self->head;
-
-    while (current != NULL)
-    {
-
+    while (current != NULL) {
         Bucket *next = current->next;
-        if (next != NULL && next->timestamp <= time_min)
-        {
+        if (next != NULL && next->timestamp <= time_min) {
             count++;
 
-            if (next->group_head != NULL)
-            {
+            if (next->group_head != NULL) {
                 Bucket *group_head = next->group_head;
                 Bucket *group_tail = next->prev;
                 group_head->group_count--;
                 group_head->group_tail = group_tail;
                 group_tail->group_head = group_head;
             }
-
             current->next = NULL;
             free_bucket(next);
-
             break;
         }
-        else
-        {
-            count += current->count;
+        else {
+             count += current->count;
         }
         current = next;
     }
