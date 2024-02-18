@@ -32,8 +32,8 @@ int main() {
             last_output_apx = wnd_bit_count_apx_next(&state_apx, item);
             //wnd_bit_count_apx_print(&state_apx);
 
-            //printf("last output (precise) = %u\n", last_output);
-            //printf("last output (approximate) = %u\n", last_output_apx);
+            printf("last output (precise) = %u\n", last_output);
+            printf("last output (approximate) = %u\n", last_output_apx);
             //printf("\n");
 
             assert(last_output >= last_output_apx);
@@ -43,7 +43,6 @@ int main() {
             //printf("K = %u, eps = %lf: x = %u, x_est = %u, error_rel = %lf\n",
             //    K, eps, last_output, last_output_apx, error_rel);
         }
-
         wnd_bit_count_apx_destruct(&state_apx);
         wnd_bit_count_destruct(&state);
     }

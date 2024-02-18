@@ -1,6 +1,6 @@
 CC=gcc
 
-test: window-bit-count-apx.h test.c
+test: kevin-window-bit-count-apx.h test.c
 	$(CC) -O0 test.c -o test.o -lm
 	./test.o
 
