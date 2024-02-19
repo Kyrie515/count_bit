@@ -73,6 +73,7 @@ typedef struct {
     u_int32_t wnd_size;
     u_int64_t k;
     Bucket *head;
+    Bucket *tail;
     int time;
     Memory_Pool *pool;
 } StateApx;
@@ -90,6 +91,7 @@ uint64_t wnd_bit_count_apx_new(StateApx* self, uint32_t wnd_size, uint32_t k) {
     self -> pool = (Memory_Pool*)malloc(sizeof(Memory_Pool));
     self -> time = 0;
     self -> head = NULL;
+    self -> tail = NULL;
     int mem_size = init_memory_pool(self -> pool, wnd_size);
     // TODO:
     // The function should return the total number of bytes allocated on the heap.
@@ -100,6 +102,7 @@ void wnd_bit_count_apx_destruct(StateApx* self) {
     // TODO: Fill me.
     // Make sure you free the memory allocated on the heap.
     self -> head = NULL;
+    self -> tail = NULL;
     self -> k = 0;
     self -> time = 0;
     self -> wnd_size = 0;
@@ -158,10 +161,58 @@ void merge_buckets(StateApx* self, Bucket* current) {
 
         Bucket *prev_head = group_tail->next;
         add_bucket_to_group(new_head, prev_head);
+        if (self -> tail == group_tail) {
+            self -> tail = new_head;
+        }
         free_bucket(group_tail);
         N_MERGES++;
         current = new_head;
     }
+}
+
+void check_remove_tail(StateApx* self, Bucket* tail, int min_time) {
+    if (tail != NULL && tail->timestamp <= min_time) {
+        Bucket *group_head = tail->group_head;
+        if (group_head == tail) {
+            Bucket *prev_group_tail = tail->prev;
+            if (prev_group_tail != NULL) {
+                prev_group_tail->next = NULL;
+                // readjust the tail
+                self->tail = prev_group_tail;
+            }
+            else {
+                self->head = NULL;
+                self->tail = NULL;
+            }
+        }
+        else {
+            Bucket *new_tail = tail->prev;
+            group_head->group_count--;
+            group_head->group_tail = new_tail;
+            new_tail->group_head = group_head;
+            new_tail->next = NULL;
+            self->tail = new_tail;
+        }
+        free_bucket(tail);
+    }
+}
+
+int count_bits(StateApx* self, Bucket* current) {
+    int count = 0;
+    while (current != NULL) {
+        Bucket *current_group_tail = current->group_tail;
+        if (current_group_tail != self->tail) {
+            count += current->count * current->group_count;
+            current = current_group_tail->next;
+        }
+        else {
+            count += current->count * current->group_count;
+            count -= current->count;
+            count++;
+            break;
+        }
+    }
+    return count;
 }
 
 uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
@@ -173,37 +224,22 @@ uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
         new_bucket -> prev = NULL;
         add_bucket_to_group(new_bucket, self -> head);
         self -> head = new_bucket;
-
+        if (self -> tail == NULL) {
+            self -> tail = new_bucket;
+        }
         Bucket *current = new_bucket;
         merge_buckets(self, current);
     }
-    wnd_bit_count_apx_print(self);
-    int count = 0;
-    int time_min = self->time - self->wnd_size + 1;
-    Bucket *current = self->head;
-    while (current != NULL) {
-        Bucket *next = current->next;
-        if (next != NULL && next->timestamp <= time_min) {
-            count++;
+    //wnd_bit_count_apx_print(self);
+    int min_time = self->time - self->wnd_size + 1;
 
-            if (next->group_head != NULL) {
-                Bucket *group_head = next->group_head;
-                Bucket *group_tail = next->prev;
-                group_head->group_count--;
-                group_head->group_tail = group_tail;
-                group_tail->group_head = group_head;
-            }
-            current->next = NULL;
-            free_bucket(next);
-            break;
-        }
-        else {
-             count += current->count;
-        }
-        current = next;
-    }
+    Bucket *tail = self->tail;
+    check_remove_tail(self, tail, min_time);
+
+    int count = 0;
+    Bucket *current = self->head;
     self->time++;
-    return count;
+    return count_bits(self, current);
 }
 
 #endif // _WINDOW_BIT_COUNT_APX_
