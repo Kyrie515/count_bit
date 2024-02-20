@@ -51,24 +51,43 @@ int init_memory_pool(Memory_Pool *pool, int size) {
    return size * sizeof(Bucket);
 }
 
+/*
+ * malloc_bucket allocates a bucket from the memory pool
+ * pool: the memory pool
+ * returns: a bucket
+ *
+ * In this function, the current pointer is used to keep track of the next available bucket,
+ * in most cases, the current pointer indeed points to the next available bucket, but in some cases,
+ * the next available bucket is not the next one in the array, so we need to loop through the array
+ * using this pointer,we get the available bucket in O(1) in amortized time complexity.
+ */
 Bucket* malloc_bucket(Memory_Pool* pool) {
     for (int i = 0; i < pool -> size; i++) {
-        if (pool -> bucket_pool[i].used == false) {
-            pool->bucket_pool[i].used = true;
-            pool->bucket_pool[i].count = 0;
-            pool->bucket_pool[i].group_count = 0;
-            pool->bucket_pool[i].timestamp = 0;
-            pool->bucket_pool[i].next = NULL;
-            pool->bucket_pool[i].prev = NULL;
-            pool->bucket_pool[i].group_head = NULL;
-            pool->bucket_pool[i].group_tail = NULL;
-            return &pool->bucket_pool[i];
+        if (!pool->bucket_pool[pool->current].used) {
+            pool->bucket_pool[pool->current].used = true;
+            pool->bucket_pool[pool->current].count = 0;
+            pool->bucket_pool[pool->current].group_count = 0;
+            pool->bucket_pool[pool->current].timestamp = 0;
+            pool->bucket_pool[pool->current].next = NULL;
+            pool->bucket_pool[pool->current].prev = NULL;
+            pool->bucket_pool[pool->current].group_head = NULL;
+            pool->bucket_pool[pool->current].group_tail = NULL;
+            return &pool->bucket_pool[pool->current];
         }
+        pool->current = (pool->current + 1) % pool->size;
     }
     printf("Memory pool is full\n");
     return NULL;
 }
 
+/*
+ * free_bucket frees a bucket from the memory pool
+ * bucket: the bucket to free
+ *
+ * we just need to set the used flag to false,
+ * so that the bucket can be used again
+
+ */
 void free_bucket(Bucket* bucket) {
     bucket->used = false;
 }
@@ -95,14 +114,28 @@ uint64_t wnd_bit_count_apx_new(StateApx* self, uint32_t wnd_size, uint32_t k) {
     self -> wnd_size = wnd_size;
     self -> k = k;
     self -> pool = (Memory_Pool*)malloc(sizeof(Memory_Pool));
-    self -> time = 0;
+    self -> time = -1;
     self -> head = NULL;
     self -> tail = NULL;
     self -> prev_count = 0;
-    int mem_size = init_memory_pool(self -> pool, wnd_size);
-    // TODO:
-    // The function should return the total number of bytes allocated on the heap.
-    return mem_size + sizeof(Memory_Pool);
+//    int mem_size = init_memory_pool(self -> pool, wnd_size);
+//    // TODO:
+//    // The function should return the total number of bytes allocated on the heap.
+//    return mem_size + sizeof(Memory_Pool);
+    int memory_size;
+    // calculate the size of the memory pool
+    if (wnd_size <= k + 1)
+    {
+        memory_size = wnd_size + 1;
+    }
+    else
+    {
+        int n = ceil(log2((double)wnd_size / (double)(k + 1) + 1) - 1);
+        memory_size = (n + 1) * (k + 1) + 1;
+    }
+    return init_memory_pool(self->pool, memory_size) + sizeof(Memory_Pool);
+
+
 }
 
 void destroy_memory_pool(Memory_Pool *pool)
@@ -125,15 +158,14 @@ void wnd_bit_count_apx_destruct(StateApx* self) {
     destroy_memory_pool(self -> pool);
 }
 
-
-void wnd_bit_count_apx_print(StateApx* self) {
-    // This is useful for debugging.
-    /*
+/*
      * print a bucket-shaped structure, including the time stamp and the count
      * like below:
      * {timestamp1, count1} -> {timestamp2, count2} -> ... -> {timestampN, countN}
      *
      */
+void wnd_bit_count_apx_print(StateApx* self) {
+    // This is useful for debugging.
     Bucket *current = self->head;
     while (current != NULL) {
         printf("{%lu, %d}", current->timestamp, current->count);
@@ -142,7 +174,7 @@ void wnd_bit_count_apx_print(StateApx* self) {
         }
         current = current->next;
     }
-    //printf("\n");
+    printf("\n");
 }
 
 /*
@@ -243,20 +275,31 @@ int count_bits(StateApx* self, Bucket* current) {
     return count;
 }
 
+/*
+ * wnd_bit_count_apx_next updates the count of the bits in the window
+ * self: the state of the algorithm
+ * item: the next item in the stream
+ * returns: the count of the bits in the window
+ *
+ * In this function, we add a new bucket to the head of the list, then we check
+ * the buckets in the same group to see if I need to merge them, then we merge the last two
+ * buckets in the group. We keep track of the size of the group, because that helps us recognize
+ * when we need to merge the last two buckets in the same group.
+ */
 uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
     // TODO: Fill me.
     self -> time++;
-    bool is_merged;
-    bool is_removed;
+    bool is_merged = false;
+    bool is_removed = false;
     if (item) {
-        Bucket *new_bucket = malloc_bucket(self -> pool);
-        new_bucket -> timestamp = self -> time;
-        new_bucket -> count = 1;
-        new_bucket -> prev = NULL;
-        add_bucket_to_group(new_bucket, self -> head);
-        self -> head = new_bucket;
-        if (self -> tail == NULL) {
-            self -> tail = new_bucket;
+        Bucket *new_bucket = malloc_bucket(self->pool);
+        new_bucket->timestamp = self->time;
+        new_bucket->count = 1;
+        new_bucket->prev = NULL;
+        add_bucket_to_group(new_bucket, self->head);
+        self->head = new_bucket;
+        if (self->tail == NULL) {
+            self->tail = new_bucket;
         }
         Bucket *current = new_bucket;
         is_merged = merge_buckets(self, current);
@@ -266,6 +309,7 @@ uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
 
     Bucket *tail = self->tail;
     is_removed = check_remove_tail(self, tail, min_time);
+
     if (! is_merged && ! is_removed) {
         if (item) {
             self->prev_count++;
