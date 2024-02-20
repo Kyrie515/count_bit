@@ -32,6 +32,7 @@ typedef struct Bucket {
 typedef struct Memory_Pool {
     int size;
     Bucket* bucket_pool;
+    int current;
 }Memory_Pool;
 
 /*
@@ -48,7 +49,7 @@ int init_memory_pool(Memory_Pool *pool, int size) {
 
 Bucket* malloc_bucket(Memory_Pool* pool) {
     for (int i = 0; i < pool -> size; i++) {
-        if (pool->bucket_pool[i].used == false) {
+        if (!pool -> bucket_pool[i].used) {
             pool->bucket_pool[i].used = true;
             pool->bucket_pool[i].count = 0;
             pool->bucket_pool[i].group_count = 0;
@@ -152,21 +153,23 @@ void add_bucket_to_group(Bucket* bucket, Bucket* group_head) {
 void merge_buckets(StateApx* self, Bucket* current) {
     while (current->group_count > self->k + 1) {
         Bucket *group_tail = current->group_tail;
-        Bucket *new_head = group_tail->prev;
+        Bucket *new_head_next = group_tail->prev;
+        Bucket *new_tail_cur = new_head_next->prev;
 
-        current->group_tail = new_head->prev;
+        new_tail_cur->group_head = current;
+        current->group_tail = new_tail_cur;
         current->group_count -= 2;
 
-        new_head->count *= 2;
+        new_head_next->count *= 2;
 
         Bucket *prev_head = group_tail->next;
-        add_bucket_to_group(new_head, prev_head);
+        add_bucket_to_group(new_head_next, prev_head);
         if (self -> tail == group_tail) {
-            self -> tail = new_head;
+            self -> tail = new_head_next;
         }
         free_bucket(group_tail);
         N_MERGES++;
-        current = new_head;
+        current = new_head_next;
     }
 }
 
@@ -236,7 +239,6 @@ uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
     Bucket *tail = self->tail;
     check_remove_tail(self, tail, min_time);
 
-    int count = 0;
     Bucket *current = self->head;
     self->time++;
     return count_bits(self, current);
