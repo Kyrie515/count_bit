@@ -44,12 +44,16 @@ typedef struct Memory_Pool {
 int init_memory_pool(Memory_Pool *pool, int size) {
    pool->size = size;
    pool->bucket_pool = (Bucket*)malloc(size * sizeof(Bucket));
+   pool->current = 0;
+    for (int i = 0; i < size; i++) {
+         pool->bucket_pool[i].used = false;
+    }
    return size * sizeof(Bucket);
 }
 
 Bucket* malloc_bucket(Memory_Pool* pool) {
     for (int i = 0; i < pool -> size; i++) {
-        if (!pool -> bucket_pool[i].used) {
+        if (pool -> bucket_pool[i].used == false) {
             pool->bucket_pool[i].used = true;
             pool->bucket_pool[i].count = 0;
             pool->bucket_pool[i].group_count = 0;
@@ -77,6 +81,7 @@ typedef struct {
     Bucket *tail;
     int time;
     Memory_Pool *pool;
+    int prev_count;
 } StateApx;
 
 // k = 1/eps
@@ -93,10 +98,19 @@ uint64_t wnd_bit_count_apx_new(StateApx* self, uint32_t wnd_size, uint32_t k) {
     self -> time = 0;
     self -> head = NULL;
     self -> tail = NULL;
+    self -> prev_count = 0;
     int mem_size = init_memory_pool(self -> pool, wnd_size);
     // TODO:
     // The function should return the total number of bytes allocated on the heap.
     return mem_size + sizeof(Memory_Pool);
+}
+
+void destroy_memory_pool(Memory_Pool *pool)
+{
+    free(pool->bucket_pool);
+    pool -> bucket_pool = NULL;
+    pool->current = 0;
+    pool->size = 0;
 }
 
 void wnd_bit_count_apx_destruct(StateApx* self) {
@@ -107,7 +121,8 @@ void wnd_bit_count_apx_destruct(StateApx* self) {
     self -> k = 0;
     self -> time = 0;
     self -> wnd_size = 0;
-    free(self -> pool);
+    self -> prev_count = 0;
+    destroy_memory_pool(self -> pool);
 }
 
 
@@ -127,7 +142,7 @@ void wnd_bit_count_apx_print(StateApx* self) {
         }
         current = current->next;
     }
-    printf("\n");
+    //printf("\n");
 }
 
 /*
@@ -148,10 +163,13 @@ void add_bucket_to_group(Bucket* bucket, Bucket* group_head) {
     }
     Bucket* group_tail = bucket -> group_tail;
     group_tail -> group_head = bucket;
+    //printf("Added bucket to group\n");
 }
 
-void merge_buckets(StateApx* self, Bucket* current) {
+bool merge_buckets(StateApx* self, Bucket* current) {
+    bool is_merged = false;
     while (current->group_count > self->k + 1) {
+        is_merged = true;
         Bucket *group_tail = current->group_tail;
         Bucket *new_head_next = group_tail->prev;
         Bucket *new_tail_cur = new_head_next->prev;
@@ -171,10 +189,14 @@ void merge_buckets(StateApx* self, Bucket* current) {
         N_MERGES++;
         current = new_head_next;
     }
+    //printf("Merged buckets\n");
+    return is_merged;
 }
 
-void check_remove_tail(StateApx* self, Bucket* tail, int min_time) {
+bool check_remove_tail(StateApx* self, Bucket* tail, int min_time) {
+    bool is_removed = false;
     if (tail != NULL && tail->timestamp <= min_time) {
+        is_removed = true;
         Bucket *group_head = tail->group_head;
         if (group_head == tail) {
             Bucket *prev_group_tail = tail->prev;
@@ -198,6 +220,8 @@ void check_remove_tail(StateApx* self, Bucket* tail, int min_time) {
         }
         free_bucket(tail);
     }
+    //printf("Removed tail\n");
+    return is_removed;
 }
 
 int count_bits(StateApx* self, Bucket* current) {
@@ -215,11 +239,15 @@ int count_bits(StateApx* self, Bucket* current) {
             break;
         }
     }
+    //printf("Counted bits\n");
     return count;
 }
 
 uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
     // TODO: Fill me.
+    self -> time++;
+    bool is_merged;
+    bool is_removed;
     if (item) {
         Bucket *new_bucket = malloc_bucket(self -> pool);
         new_bucket -> timestamp = self -> time;
@@ -231,17 +259,23 @@ uint32_t wnd_bit_count_apx_next(StateApx* self, bool item) {
             self -> tail = new_bucket;
         }
         Bucket *current = new_bucket;
-        merge_buckets(self, current);
+        is_merged = merge_buckets(self, current);
     }
     //wnd_bit_count_apx_print(self);
     int min_time = self->time - self->wnd_size + 1;
 
     Bucket *tail = self->tail;
-    check_remove_tail(self, tail, min_time);
-
+    is_removed = check_remove_tail(self, tail, min_time);
+    if (! is_merged && ! is_removed) {
+        if (item) {
+            self->prev_count++;
+        }
+        return self->prev_count;
+    }
     Bucket *current = self->head;
-    self->time++;
-    return count_bits(self, current);
+    self->prev_count = count_bits(self, current);
+    //printf("Done with next\n");
+    return self->prev_count;
 }
 
 #endif // _WINDOW_BIT_COUNT_APX_
